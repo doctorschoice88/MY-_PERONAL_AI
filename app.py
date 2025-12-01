@@ -1,109 +1,144 @@
 import streamlit as st
-import google.generativeai as genai
 import yfinance as yf
 
-# --- PAGE SETUP ---
+from google import genai
+from google.genai import types
+
+# =========================
+#  PAGE SETUP
+# =========================
 st.set_page_config(page_title="My AI Team", page_icon="🤖")
 st.title("🤖 Trading & Healing Mate (Lite)")
+st.caption("Powered by Google Gemini (Gemini 3 / 2.5 / 2.0 fallback)")
 
-# IMPORTANT: caption generic rakho, model version change hota rehta hai
-st.caption("Powered by Google Gemini (Fast & Lite)")
-
-# --- 1. API KEY CHECK ---
-if "GEMINI_API_KEY" in st.secrets:
-    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-else:
-    st.error("❌ API Key missing! Go to .streamlit/secrets.toml and set GEMINI_API_KEY.")
+# =========================
+#  GEMINI CLIENT SETUP
+# =========================
+if "GEMINI_API_KEY" not in st.secrets:
+    st.error("❌ GEMINI_API_KEY missing in Streamlit secrets.")
     st.stop()
 
-# --- 2. LIVE MARKET DATA ---
+client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+
+# =========================
+#  LIVE NIFTY DATA
+# =========================
 st.sidebar.header("🔴 Live Nifty Status")
 
+
 def get_market_data():
+    """Nifty live snapshot (tries 1-min data, then daily)."""
     try:
-        nifty = yf.Ticker("^NSEI")
-        data = nifty.history(period="1d")
-        if not data.empty:
-            current = data['Close'].iloc[-1]
-            change = current - data['Open'].iloc[-1]
-            color = "green" if change >= 0 else "red"
-            st.sidebar.metric("Nifty 50", f"{current:.2f}")
-            st.sidebar.markdown(f"Change: :{color}[{change:.2f}]")
-            return f"Current Nifty Price: {current:.2f}"
-        return "Market Data Unavailable"
-    except Exception:
-        return "Data Error"
+        ticker = yf.Ticker("^NSEI")
 
-market_status = get_market_data()
+        # Try intraday data first
+        data = ticker.history(period="1d", interval="1m")
+        if data.empty:
+            # fallback: daily OHLC
+            data = ticker.history(period="1d")
 
-# --- 3. CHAT HISTORY ---
+        if data.empty:
+            return None, "Market data empty."
+
+        last = data.iloc[-1]
+        current = float(last["Close"])
+        open_price = float(data["Open"].iloc[0])
+        change = current - open_price
+        pct = (change / open_price) * 100
+
+        info = {
+            "current": current,
+            "change": change,
+            "pct": pct,
+        }
+        return info, None
+
+    except Exception as e:
+        return None, str(e)
+
+
+market_info, market_err = get_market_data()
+
+# Sidebar + main display + text summary for model
+if market_info:
+    current = market_info["current"]
+    change = market_info["change"]
+    pct = market_info["pct"]
+
+    color = "green" if change >= 0 else "red"
+    st.sidebar.metric("Nifty 50", f"{current:.2f}", f"{change:+.2f} ({pct:+.2f}%)")
+
+    st.subheader("📈 Live Nifty Snapshot")
+    st.write(f"**Nifty 50:** {current:.2f}  |  Change: {change:+.2f}  ({pct:+.2f}%)")
+
+    market_status = (
+        f"Nifty 50 live is around {current:.2f} points, "
+        f"change {change:+.2f} points ({pct:+.2f}% vs today's open)."
+    )
+else:
+    st.subheader("📈 Live Nifty Snapshot")
+    st.write("Live data nahi aa paya.")
+    if market_err:
+        st.caption(f"Debug info: {market_err}")
+    market_status = "Nifty live data is currently unavailable."
+
+# =========================
+#  CHAT HISTORY
+# =========================
+SYSTEM_PROMPT = (
+    "You are Rajat's personal Trading Psychology & Healing Assistant.\n"
+    "- Focus on mindset, risk management, and calm behaviour.\n"
+    "- Do NOT give direct financial advice, targets, or sure-shot trades.\n"
+    "- Keep answers short, practical, and stress-free.\n"
+    "- Use simple Hindi + English mix, friendly tone.\n"
+)
+
 if "messages" not in st.session_state:
-    st.session_state.messages = []
-    st.session_state.messages.append({
-        "role": "system",
-        "content": (
-            "You are a helpful AI Assistant for Trading Psychology and Healing. "
-            "Keep answers short, practical, and stress-free. "
-            "Avoid financial advice; focus on mindset, risk control, and emotional balance."
-        )
-    })
+    st.session_state.messages = [
+        {"role": "system", "content": SYSTEM_PROMPT}
+    ]
 
-# Show only user + assistant messages in UI
+# Show past conversation (user + assistant only)
 for msg in st.session_state.messages:
     if msg["role"] in ["user", "assistant"]:
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
 
-# --- 4. USER INPUT ---
-user_input = st.chat_input("Puchiye...")
+# =========================
+#  USER INPUT
+# =========================
+user_input = st.chat_input("Puchiye... (Main soch kar jawab dunga)")
 
 if user_input:
+    # Show user message
     st.chat_message("user").write(user_input)
     st.session_state.messages.append({"role": "user", "content": user_input})
 
-    full_prompt = (
-        f"{st.session_state.messages[0]['content']}\n\n"
-        f"Live Market Data: {market_status}\n\n"
-        f"User Query: {user_input}"
-    )
+    # Build full conversation text for the model
+    # (simple format: System + history + latest)
+    convo_lines = [SYSTEM_PROMPT, f"Live Market: {market_status}", ""]
+    for m in st.session_state.messages:
+        if m["role"] == "user":
+            convo_lines.append(f"User: {m['content']}")
+        elif m["role"] == "assistant":
+            convo_lines.append(f"Assistant: {m['content']}")
+    convo_lines.append("Assistant:")  # model continues from here
 
+    full_prompt = "\n".join(convo_lines)
+
+    # =========================
+    #  GEMINI 3 / 2.5 / 2.0 CALL
+    # =========================
     with st.chat_message("assistant"):
         status_box = st.empty()
-        status_box.text("Gehari soch vichar kar raha hoon...")
+        status_box.text("🧠 Gehri soch-vichar chal rahi hai...")
 
         try:
-            # 🔁 TRY NEW LIGHT MODEL FIRST
-            #   Tum yahan alag models try kar sakte ho:
-            #   - "gemini-2.0-flash" (fast, cheap)
-            #   - "gemini-1.5-flash-latest" (agar account me enabled ho)
-            #   - "gemini-2.0-flash-lite-preview" (bahut light)
-            model_name = "gemini-2.0-flash"
+            # Try latest 'thinking style' models first, then safe ones
+            candidate_models = [
+                "gemini-3.0-pro",   # sabse latest, agar account me enabled ho
+                "gemini-2.5-flash", # fast + advanced
+                "gemini-2.0-flash", # widely available, safe fallback
+            ]
 
-            model = genai.GenerativeModel(model_name)
-            response = model.generate_content(full_prompt)
-
-            status_box.empty()
-
-            reply = response.text if hasattr(response, "text") else str(response)
-            st.write(reply)
-            st.session_state.messages.append({"role": "assistant", "content": reply})
-
-        except Exception as e:
-            status_box.empty()
-            err = str(e)
-            st.error(f"⚠️ Error aaya: {err}")
-
-            # --- FRIENDLY MESSAGES ---
-            if "404" in err and "models/" in err:
-                st.warning(
-                    "Model name galat ya unavailable hai. "
-                    "Backend code me model_name ko kisi supported model se replace karo "
-                    "(jaise 'gemini-2.0-flash')."
-                )
-            elif "Quota" in err or "429" in err:
-                st.warning(
-                    "Free quota khatam ho chuka hai ya limit bahut low hai. "
-                    "Google Cloud Console me billing / quota check karo."
-                )
-            else:
-                st.info("Thoda der baad dobara try karo, ya console me full error log dekho.")
+            last

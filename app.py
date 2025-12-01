@@ -1,22 +1,24 @@
 import streamlit as st
 import google.generativeai as genai
 import yfinance as yf
-import time
 
 # --- PAGE SETUP ---
 st.set_page_config(page_title="My AI Team", page_icon="🤖")
 st.title("🤖 Trading & Healing Mate (Lite)")
-st.caption("Powered by Gemini 1.5 Flash (Fast & Free)")
+
+# IMPORTANT: caption generic rakho, model version change hota rehta hai
+st.caption("Powered by Google Gemini (Fast & Lite)")
 
 # --- 1. API KEY CHECK ---
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 else:
-    st.error("❌ API Key missing!")
+    st.error("❌ API Key missing! Go to .streamlit/secrets.toml and set GEMINI_API_KEY.")
     st.stop()
 
 # --- 2. LIVE MARKET DATA ---
 st.sidebar.header("🔴 Live Nifty Status")
+
 def get_market_data():
     try:
         nifty = yf.Ticker("^NSEI")
@@ -29,7 +31,7 @@ def get_market_data():
             st.sidebar.markdown(f"Change: :{color}[{change:.2f}]")
             return f"Current Nifty Price: {current:.2f}"
         return "Market Data Unavailable"
-    except:
+    except Exception:
         return "Data Error"
 
 market_status = get_market_data()
@@ -38,38 +40,70 @@ market_status = get_market_data()
 if "messages" not in st.session_state:
     st.session_state.messages = []
     st.session_state.messages.append({
-        "role": "model",
-        "content": "You are a helpful AI Assistant for Trading Psychology and Healing. Keep answers short and practical."
+        "role": "system",
+        "content": (
+            "You are a helpful AI Assistant for Trading Psychology and Healing. "
+            "Keep answers short, practical, and stress-free. "
+            "Avoid financial advice; focus on mindset, risk control, and emotional balance."
+        )
     })
 
+# Show only user + assistant messages in UI
 for msg in st.session_state.messages:
-    if msg["role"] != "model":
+    if msg["role"] in ["user", "assistant"]:
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
 
 # --- 4. USER INPUT ---
-if prompt := st.chat_input("Puchiye..."):
-    st.chat_message("user").write(prompt)
-    st.session_state.messages.append({"role": "user", "content": prompt})
+user_input = st.chat_input("Puchiye...")
 
-    full_prompt = f"Live Market Data: {market_status}. User Query: {prompt}"
+if user_input:
+    st.chat_message("user").write(user_input)
+    st.session_state.messages.append({"role": "user", "content": user_input})
+
+    full_prompt = (
+        f"{st.session_state.messages[0]['content']}\n\n"
+        f"Live Market Data: {market_status}\n\n"
+        f"User Query: {user_input}"
+    )
 
     with st.chat_message("assistant"):
         status_box = st.empty()
-        status_box.text("Thinking...")
-        
+        status_box.text("Gehari soch vichar kar raha hoon...")
+
         try:
-            # 🛑 FORCE USE: Gemini 1.5 Flash (Sabse Safe Model)
-            model = genai.GenerativeModel("gemini-1.5-flash")
+            # 🔁 TRY NEW LIGHT MODEL FIRST
+            #   Tum yahan alag models try kar sakte ho:
+            #   - "gemini-2.0-flash" (fast, cheap)
+            #   - "gemini-1.5-flash-latest" (agar account me enabled ho)
+            #   - "gemini-2.0-flash-lite-preview" (bahut light)
+            model_name = "gemini-2.0-flash"
+
+            model = genai.GenerativeModel(model_name)
             response = model.generate_content(full_prompt)
-            
+
             status_box.empty()
-            st.write(response.text)
-            st.session_state.messages.append({"role": "assistant", "content": response.text})
+
+            reply = response.text if hasattr(response, "text") else str(response)
+            st.write(reply)
+            st.session_state.messages.append({"role": "assistant", "content": reply})
 
         except Exception as e:
             status_box.empty()
-            # Agar error aaye toh saaf batao
-            st.error(f"⚠️ Error aaya: {e}")
-            if "429" in str(e) or "Quota" in str(e):
-                st.warning("Quota Limit Hit: Thodi der ruk kar try karein.")
+            err = str(e)
+            st.error(f"⚠️ Error aaya: {err}")
+
+            # --- FRIENDLY MESSAGES ---
+            if "404" in err and "models/" in err:
+                st.warning(
+                    "Model name galat ya unavailable hai. "
+                    "Backend code me model_name ko kisi supported model se replace karo "
+                    "(jaise 'gemini-2.0-flash')."
+                )
+            elif "Quota" in err or "429" in err:
+                st.warning(
+                    "Free quota khatam ho chuka hai ya limit bahut low hai. "
+                    "Google Cloud Console me billing / quota check karo."
+                )
+            else:
+                st.info("Thoda der baad dobara try karo, ya console me full error log dekho.")

@@ -4,9 +4,9 @@ import yfinance as yf
 import re
 
 # --- 1. PAGE SETUP ---
-st.set_page_config(page_title="My Thinking AI", page_icon="🧠")
-st.title("🧠 Nifty & Healing Mate (Thinking Mode)")
-st.caption("Powered by Gemini 1.5 Pro • Live Data • Chain of Thought")
+st.set_page_config(page_title="My Smart AI", page_icon="🧠")
+st.title("🧠 Auto-Pilot Trading & Healing Mate")
+st.caption("Auto-Switching Models • Live Data • Thinking Mode")
 
 # --- 2. LIVE DATA ANTENNA ---
 st.sidebar.header("🔴 Live Market Status")
@@ -21,7 +21,7 @@ def get_market_data():
             color = "green" if change >= 0 else "red"
             st.sidebar.metric("Nifty 50", f"{current:.2f}")
             st.sidebar.markdown(f"Diff: :{color}[{change:.2f}]")
-            return f"Current Nifty Price: {current:.2f}, Day Change: {change:.2f}"
+            return f"Current Nifty Price: {current:.2f}"
         return "Market Data Unavailable"
     except:
         return "Data Error"
@@ -35,68 +35,85 @@ else:
     st.error("API Key missing!")
     st.stop()
 
-# --- 4. CHAT LOGIC ---
+# --- 4. SMART MODEL SELECTOR (BRAHMASTRA LOGIC) ---
+def get_smart_response(full_prompt):
+    # Ye list mein se ek-ek karke try karega
+    models_to_try = [
+        "gemini-1.5-flash",       # Sabse tez
+        "gemini-1.5-pro",         # Sabse smart
+        "gemini-1.5-flash-001",   # Specific version
+        "gemini-1.5-pro-001",     # Specific version
+        "gemini-pro"              # Sabse purana aur stable (Ye pakka chalta hai)
+    ]
+    
+    last_error = ""
+    
+    for model_name in models_to_try:
+        try:
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content(full_prompt)
+            # Agar safalta mili, toh model ka naam aur jawab wapas karo
+            return response.text, model_name
+        except Exception as e:
+            last_error = e
+            continue # Agla model try karo
+            
+    # Agar saare fail ho gaye
+    raise Exception(f"All models failed. Last error: {last_error}")
+
+# --- 5. CHAT LOGIC ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
-    # System Prompt with "Thinking" Instruction
     st.session_state.messages.append({
         "role": "model",
-        "content": """You are a smart AI. 
-        IMPORTANT RULE: For every answer, you MUST first 'think' about the user's situation, market data, and psychology. 
-        Write your deep reasoning inside <think> and </think> tags, then provide the final polite answer outside the tags.
-        Example: <think>User is panicking. Market is down 1%. I need to calm them.</think> Hey, relax..."""
+        "content": "You are a helpful AI. Think deeply before answering using <think> tags."
     })
 
-# Display History
+# History Display
 for msg in st.session_state.messages:
     if msg["role"] != "model":
         with st.chat_message(msg["role"]):
-            # History mein Thinking ko Expander mein dikhana
             content = msg["content"]
-            thought_match = re.search(r'<think>(.*?)</think>', content, re.DOTALL)
-            if thought_match:
-                thought_text = thought_match.group(1).strip()
-                final_text = content.replace(thought_match.group(0), "").strip()
-                with st.expander("🧠 AI Thought Process (Tap to view)"):
-                    st.markdown(thought_text)
-                st.markdown(final_text)
+            # Thinking box logic
+            if "<think>" in content:
+                parts = content.split("</think>")
+                thought = parts[0].replace("<think>", "").strip()
+                answer = parts[1].strip() if len(parts) > 1 else ""
+                with st.expander("🧠 AI Thought Process"):
+                    st.write(thought)
+                st.write(answer)
             else:
-                st.markdown(content)
+                st.write(content)
 
-# --- 5. USER INPUT ---
-if prompt := st.chat_input("Puchiye... (Main soch kar jawab dunga)"):
-    st.chat_message("user").markdown(prompt)
+# --- 6. USER INPUT ---
+if prompt := st.chat_input("Kuch bhi puchiye..."):
+    st.chat_message("user").write(prompt)
     st.session_state.messages.append({"role": "user", "content": prompt})
 
     full_prompt = f"Live Market Data: {market_status}. User Query: {prompt}"
 
     with st.chat_message("assistant"):
-        status_text = st.empty() # Placeholder for 'Thinking...'
-        status_text.status("🧠 Gehari soch vichar kar raha hoon...", expanded=True)
+        status_box = st.status("🧠 Dimag laga raha hoon (Finding best model)...", expanded=True)
         
         try:
-            model = genai.GenerativeModel("gemini-1.5-pro")
-            response = model.generate_content(full_prompt)
-            text = response.text
+            # Smart Function call kar rahe hain
+            response_text, used_model = get_smart_response(full_prompt)
             
-            # Logic to separate Thought vs Answer
-            status_text.empty() # Remove loading status
+            status_box.update(label=f"✅ Success! Used Model: {used_model}", state="complete", expanded=False)
             
-            thought_match = re.search(r'<think>(.*?)</think>', text, re.DOTALL)
-            if thought_match:
-                thought_content = thought_match.group(1).strip()
-                final_answer = text.replace(thought_match.group(0), "").strip()
-                
-                # 1. Pehle Thinking dikhao (Hidden box mein)
-                with st.expander("🧠 AI Thought Process (Analysis)", expanded=True):
-                    st.markdown(thought_content)
-                
-                # 2. Phir Final Answer
-                st.markdown(final_answer)
+            # Formatting Response
+            if "<think>" in response_text:
+                parts = response_text.split("</think>")
+                thought = parts[0].replace("<think>", "").strip()
+                answer = parts[1].strip() if len(parts) > 1 else ""
+                with st.expander("🧠 AI Thought Process"):
+                    st.write(thought)
+                st.write(answer)
             else:
-                st.markdown(text)
+                st.write(response_text)
                 
-            st.session_state.messages.append({"role": "assistant", "content": text})
+            st.session_state.messages.append({"role": "assistant", "content": response_text})
 
         except Exception as e:
-            st.error(f"Error: {e}")
+            status_box.update(label="❌ Failed", state="error")
+            st.error(f"Bhai abhi bhi issue hai: {e}")

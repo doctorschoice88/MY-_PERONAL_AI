@@ -25,23 +25,18 @@ client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 # =========================
 st.sidebar.header("🔴 Live Nifty Status")
 
-
 def get_market_data():
     """Nifty live snapshot (tries 1-min data, then daily)."""
     try:
         ticker = yf.Ticker("^NSEI")
-
-        # Try intraday data first
         data = ticker.history(period="1d", interval="1m")
         if data.empty:
-            # fallback: daily OHLC
             data = ticker.history(period="1d")
-
         if data.empty:
             return None, "Market data empty."
 
-        last = data.iloc[-1]
-        current = float(last["Close"])
+        last_row = data.iloc[-1]
+        current = float(last_row["Close"])
         open_price = float(data["Open"].iloc[0])
         change = current - open_price
         pct = (change / open_price) * 100
@@ -56,10 +51,8 @@ def get_market_data():
     except Exception as e:
         return None, str(e)
 
-
 market_info, market_err = get_market_data()
 
-# Sidebar + main display + text summary for model
 if market_info:
     current = market_info["current"]
     change = market_info["change"]
@@ -98,7 +91,6 @@ if "messages" not in st.session_state:
         {"role": "system", "content": SYSTEM_PROMPT}
     ]
 
-# Show past conversation (user + assistant only)
 for msg in st.session_state.messages:
     if msg["role"] in ["user", "assistant"]:
         with st.chat_message(msg["role"]):
@@ -110,35 +102,80 @@ for msg in st.session_state.messages:
 user_input = st.chat_input("Puchiye... (Main soch kar jawab dunga)")
 
 if user_input:
-    # Show user message
     st.chat_message("user").write(user_input)
     st.session_state.messages.append({"role": "user", "content": user_input})
 
-    # Build full conversation text for the model
-    # (simple format: System + history + latest)
     convo_lines = [SYSTEM_PROMPT, f"Live Market: {market_status}", ""]
     for m in st.session_state.messages:
         if m["role"] == "user":
             convo_lines.append(f"User: {m['content']}")
         elif m["role"] == "assistant":
             convo_lines.append(f"Assistant: {m['content']}")
-    convo_lines.append("Assistant:")  # model continues from here
+    convo_lines.append("Assistant:")
 
     full_prompt = "\n".join(convo_lines)
 
-    # =========================
-    #  GEMINI 3 / 2.5 / 2.0 CALL
-    # =========================
     with st.chat_message("assistant"):
         status_box = st.empty()
         status_box.text("🧠 Gehri soch-vichar chal rahi hai...")
 
         try:
-            # Try latest 'thinking style' models first, then safe ones
             candidate_models = [
-                "gemini-3.0-pro",   # sabse latest, agar account me enabled ho
-                "gemini-2.5-flash", # fast + advanced
-                "gemini-2.0-flash", # widely available, safe fallback
+                "gemini-3.0-pro",
+                "gemini-2.5-flash",
+                "gemini-2.0-flash",
             ]
 
-            last
+            last_error = None
+            used_model = None
+            response = None
+
+            for model_name in candidate_models:
+                try:
+                    resp = client.models.generate_content(
+                        model=model_name,
+                        contents=full_prompt,
+                        config=types.GenerateContentConfig(
+                            temperature=0.6,
+                            max_output_tokens=400,
+                        ),
+                    )
+                    response = resp
+                    used_model = model_name
+                    break
+                except Exception as e_inner:
+                    last_error = e_inner
+                    continue
+
+            if response is None:
+                raise last_error or Exception("No Gemini model could be used.")
+
+            status_box.empty()
+            reply = response.text if hasattr(response, "text") else str(response)
+
+            st.markdown(f"🧠 _Model used: **{used_model}**_")
+            st.write(reply)
+            st.session_state.messages.append(
+                {"role": "assistant", "content": reply}
+            )
+
+        except Exception as e:
+            status_box.empty()
+            err = str(e)
+            st.error(f"⚠️ Error aaya: {err}")
+
+            if "404" in err and "models/" in err:
+                st.warning(
+                    "Lagta hai Gemini 3 / 2.5 model aapke project me enabled nahi hai. "
+                    "Google AI Studio / Cloud console me available models check karo."
+                )
+            elif "Quota" in err or "429" in err or "quota" in err.lower():
+                st.warning(
+                    "Free / trial quota hit ho gaya. Thodi der baad try karo "
+                    "ya billing + higher quota enable karo."
+                )
+            else:
+                st.info(
+                    "Yeh error temporary bhi ho sakta hai. "
+                    "Agar baar-baar aaye toh console logs check karo."
+                )

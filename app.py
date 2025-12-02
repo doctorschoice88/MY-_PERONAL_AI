@@ -1,181 +1,109 @@
 import streamlit as st
+import google.generativeai as genai
 import yfinance as yf
+import re
 
-from google import genai
-from google.genai import types
+# --- PAGE SETUP ---
+st.set_page_config(page_title="Trading & Healing Mate", page_icon="🧠")
+st.title("🧠 Trading & Healing Mate")
+st.caption("Powered by Gemini 2.5 (Thinking Mode) • Live Nifty Data")
 
-# =========================
-#  PAGE SETUP
-# =========================
-st.set_page_config(page_title="My AI Team", page_icon="🤖")
-st.title("🤖 Trading & Healing Mate (Lite)")
-st.caption("Powered by Google Gemini (Gemini 3 / 2.5 / 2.0 fallback)")
-
-# =========================
-#  GEMINI CLIENT SETUP
-# =========================
-if "GEMINI_API_KEY" not in st.secrets:
-    st.error("❌ GEMINI_API_KEY missing in Streamlit secrets.")
-    st.stop()
-
-client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
-
-# =========================
-#  LIVE NIFTY DATA
-# =========================
-st.sidebar.header("🔴 Live Nifty Status")
+# --- 1. LIVE NIFTY DATA ---
+st.sidebar.header("🔴 Live Market Status")
 
 def get_market_data():
-    """Nifty live snapshot (tries 1-min data, then daily)."""
     try:
-        ticker = yf.Ticker("^NSEI")
-        data = ticker.history(period="1d", interval="1m")
-        if data.empty:
-            data = ticker.history(period="1d")
-        if data.empty:
-            return None, "Market data empty."
+        nifty = yf.Ticker("^NSEI")
+        data = nifty.history(period="1d")
+        if not data.empty:
+            current = data['Close'].iloc[-1]
+            change = current - data['Open'].iloc[-1]
+            color = "green" if change >= 0 else "red"
+            
+            st.sidebar.metric("Nifty 50", f"{current:.2f}")
+            st.sidebar.markdown(f"Change: :{color}[{change:.2f}]")
+            return f"Current Nifty Price: {current:.2f}, Change: {change:.2f}"
+        return "Market Data Unavailable"
+    except:
+        return "Data Error"
 
-        last_row = data.iloc[-1]
-        current = float(last_row["Close"])
-        open_price = float(data["Open"].iloc[0])
-        change = current - open_price
-        pct = (change / open_price) * 100
+market_status = get_market_data()
 
-        info = {
-            "current": current,
-            "change": change,
-            "pct": pct,
-        }
-        return info, None
-
-    except Exception as e:
-        return None, str(e)
-
-market_info, market_err = get_market_data()
-
-if market_info:
-    current = market_info["current"]
-    change = market_info["change"]
-    pct = market_info["pct"]
-
-    color = "green" if change >= 0 else "red"
-    st.sidebar.metric("Nifty 50", f"{current:.2f}", f"{change:+.2f} ({pct:+.2f}%)")
-
-    st.subheader("📈 Live Nifty Snapshot")
-    st.write(f"**Nifty 50:** {current:.2f}  |  Change: {change:+.2f}  ({pct:+.2f}%)")
-
-    market_status = (
-        f"Nifty 50 live is around {current:.2f} points, "
-        f"change {change:+.2f} points ({pct:+.2f}% vs today's open)."
-    )
+# --- 2. API KEY SETUP ---
+if "GEMINI_API_KEY" in st.secrets:
+    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 else:
-    st.subheader("📈 Live Nifty Snapshot")
-    st.write("Live data nahi aa paya.")
-    if market_err:
-        st.caption(f"Debug info: {market_err}")
-    market_status = "Nifty live data is currently unavailable."
+    st.error("❌ API Key missing!")
+    st.stop()
 
-# =========================
-#  CHAT HISTORY
-# =========================
-SYSTEM_PROMPT = (
-    "You are Rajat's personal Trading Psychology & Healing Assistant.\n"
-    "- Focus on mindset, risk management, and calm behaviour.\n"
-    "- Do NOT give direct financial advice, targets, or sure-shot trades.\n"
-    "- Keep answers short, practical, and stress-free.\n"
-    "- Use simple Hindi + English mix, friendly tone.\n"
-)
-
+# --- 3. CHAT HISTORY ---
 if "messages" not in st.session_state:
-    st.session_state.messages = [
-        {"role": "system", "content": SYSTEM_PROMPT}
-    ]
+    st.session_state.messages = []
+    # SPECIAL SYSTEM PROMPT (Isse AI "Sochna" seekhega)
+    st.session_state.messages.append({
+        "role": "model",
+        "content": """You are a smart AI companion for a trader healing from trauma.
+        
+        RULES:
+        1. **THINK FIRST**: Before answering, you MUST think deeply about the user's emotion and market situation. Put your thoughts inside <think> ... </think> tags.
+        2. **Trading**: Today is Tuesday (Nifty Expiry). Use the live data provided.
+        3. **Healing**: Be calm. If user panics, guide them with breathing techniques.
+        
+        Example Format:
+        <think>User is anxious about Nifty drop. I should check the data (-50 points). I need to calm them down first.</think>
+        Hey, take a deep breath..."""
+    })
 
+# --- 4. DISPLAY CHAT ---
 for msg in st.session_state.messages:
-    if msg["role"] in ["user", "assistant"]:
+    if msg["role"] != "model":
         with st.chat_message(msg["role"]):
-            st.write(msg["content"])
+            # Agar purane messages mein thinking hai toh usse dikhao
+            content = msg["content"]
+            if "<think>" in content:
+                parts = content.split("</think>")
+                thought = parts[0].replace("<think>", "").strip()
+                answer = parts[1].strip() if len(parts) > 1 else ""
+                
+                with st.expander("🧠 AI ki Soch (Thoughts)"):
+                    st.info(thought)
+                st.markdown(answer)
+            else:
+                st.markdown(content)
 
-# =========================
-#  USER INPUT
-# =========================
-user_input = st.chat_input("Puchiye... (Main soch kar jawab dunga)")
+# --- 5. USER INPUT ---
+if prompt := st.chat_input("Puchiye... (Main soch kar jawab dunga)"):
+    st.chat_message("user").markdown(prompt)
+    st.session_state.messages.append({"role": "user", "content": prompt})
 
-if user_input:
-    st.chat_message("user").write(user_input)
-    st.session_state.messages.append({"role": "user", "content": user_input})
-
-    convo_lines = [SYSTEM_PROMPT, f"Live Market: {market_status}", ""]
-    for m in st.session_state.messages:
-        if m["role"] == "user":
-            convo_lines.append(f"User: {m['content']}")
-        elif m["role"] == "assistant":
-            convo_lines.append(f"Assistant: {m['content']}")
-    convo_lines.append("Assistant:")
-
-    full_prompt = "\n".join(convo_lines)
+    full_prompt = f"Live Nifty Data: {market_status}. User Query: {prompt}"
 
     with st.chat_message("assistant"):
-        status_box = st.empty()
-        status_box.text("🧠 Gehri soch-vichar chal rahi hai...")
-
+        status_box = st.status("🧠 Gehari soch vichar (Thinking)...", expanded=True)
+        
         try:
-            candidate_models = [
-                "gemini-3.0-pro",
-                "gemini-2.5-flash",
-                "gemini-2.0-flash",
-            ]
-
-            last_error = None
-            used_model = None
-            response = None
-
-            for model_name in candidate_models:
-                try:
-                    resp = client.models.generate_content(
-                        model=model_name,
-                        contents=full_prompt,
-                        config=types.GenerateContentConfig(
-                            temperature=0.6,
-                            max_output_tokens=400,
-                        ),
-                    )
-                    response = resp
-                    used_model = model_name
-                    break
-                except Exception as e_inner:
-                    last_error = e_inner
-                    continue
-
-            if response is None:
-                raise last_error or Exception("No Gemini model could be used.")
-
-            status_box.empty()
-            reply = response.text if hasattr(response, "text") else str(response)
-
-            st.markdown(f"🧠 _Model used: **{used_model}**_")
-            st.write(reply)
-            st.session_state.messages.append(
-                {"role": "assistant", "content": reply}
-            )
+            # Hum wahi Model use karenge jo aapke screenshot mein chala tha
+            model = genai.GenerativeModel("gemini-2.5-flash")
+            response = model.generate_content(full_prompt)
+            text = response.text
+            
+            status_box.update(label="✅ Jawab Taiyaar!", state="complete", expanded=False)
+            
+            # Thinking aur Answer ko alag-alag karke dikhana
+            if "<think>" in text:
+                parts = text.split("</think>")
+                thought = parts[0].replace("<think>", "").strip()
+                answer = parts[1].strip() if len(parts) > 1 else ""
+                
+                with st.expander("🧠 AI ki Soch (Thoughts)", expanded=True):
+                    st.info(thought)
+                
+                st.markdown(answer)
+            else:
+                st.markdown(text)
+                
+            st.session_state.messages.append({"role": "assistant", "content": text})
 
         except Exception as e:
-            status_box.empty()
-            err = str(e)
-            st.error(f"⚠️ Error aaya: {err}")
-
-            if "404" in err and "models/" in err:
-                st.warning(
-                    "Lagta hai Gemini 3 / 2.5 model aapke project me enabled nahi hai. "
-                    "Google AI Studio / Cloud console me available models check karo."
-                )
-            elif "Quota" in err or "429" in err or "quota" in err.lower():
-                st.warning(
-                    "Free / trial quota hit ho gaya. Thodi der baad try karo "
-                    "ya billing + higher quota enable karo."
-                )
-            else:
-                st.info(
-                    "Yeh error temporary bhi ho sakta hai. "
-                    "Agar baar-baar aaye toh console logs check karo."
-                )
+            status_box.update(label="❌ Error", state="error")
+            st.error(f"Error: {e}")

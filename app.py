@@ -69,7 +69,7 @@ if prompt := st.chat_input("Nifty ya Healing ke baare mein puchiye..."):
     with st.chat_message("assistant"):
         with st.spinner("Gemini 2.5 (Unlocked) soch raha hai..."):
             try:
-                # 🚀 GEMINI 2.5 FLASH (Jo screenshot mein chala tha)
+                # 🚀 GEMINI 2.5 pro (Jo screenshot mein chala tha)
                 model = genai.GenerativeModel("gemini-2.5-pro")
                 
                 # Safety Settings pass kar rahe hain taaki 'None' na aaye
@@ -82,7 +82,7 @@ if prompt := st.chat_input("Nifty ya Healing ke baare mein puchiye..."):
                     st.error("Empty response received. Try asking differently.")
             
             except Exception as e:
-                # Agar 2.5 fail hua, toh 1.5 Flash try karenge
+                # Agar 2.5 fail hua, toh 1.5 pro try karenge
                 try:
                     st.warning("Switching to backup model...")
                     model = genai.GenerativeModel("gemini-1.5-pro")

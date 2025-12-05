@@ -70,7 +70,7 @@ if prompt := st.chat_input("Nifty ya Healing ke baare mein puchiye..."):
         with st.spinner("Gemini 2.5 (Unlocked) soch raha hai..."):
             try:
                 # 🚀 GEMINI 2.5 FLASH (Jo screenshot mein chala tha)
-                model = genai.GenerativeModel("gemini-2.5-flash")
+                model = genai.GenerativeModel("gemini-2.5-pro")
                 
                 # Safety Settings pass kar rahe hain taaki 'None' na aaye
                 response = model.generate_content(full_prompt, safety_settings=safety_settings)
@@ -85,7 +85,7 @@ if prompt := st.chat_input("Nifty ya Healing ke baare mein puchiye..."):
                 # Agar 2.5 fail hua, toh 1.5 Flash try karenge
                 try:
                     st.warning("Switching to backup model...")
-                    model = genai.GenerativeModel("gemini-1.5-flash")
+                    model = genai.GenerativeModel("gemini-1.5-pro")
                     response = model.generate_content(full_prompt, safety_settings=safety_settings)
                     st.markdown(response.text)
                     st.session_state.messages.append({"role": "assistant", "content": response.text})
